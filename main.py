@@ -21,14 +21,13 @@ def get_signal(ticker: str, risk_percent: float, account_balance: float):
         if len(close_prices) < 2:
             return {"error": "Not enough data"}
 
-        # Fixed line: Convert NumPy mean to float
         mean_price = np.mean(close_prices[-20:]).item()
         confidence = round(abs(close_prices[-1] - mean_price) / close_prices[-1], 2)
-        entry_price = round(close_prices[-1], 2)
+        entry_price = round(float(close_prices[-1]), 2)  # ← FIXED HERE
         shares = int((account_balance * (risk_percent / 100)) // entry_price)
         accuracy = round(np.random.uniform(0.65, 0.9), 2)
 
-        timeseries = [{"time": str(i), "price": round(p, 2)} for i, p in enumerate(close_prices[-30:])]
+        timeseries = [{"time": str(i), "price": round(float(p), 2)} for i, p in enumerate(close_prices[-30:])]
 
         return {
             "summary": {
