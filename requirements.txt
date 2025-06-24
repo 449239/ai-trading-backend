@@ -1,4 +1,6 @@
-fastapi
-uvicorn
+streamlit>=1.0.0
 yfinance
+pandas
 numpy
+plotly
+ta
