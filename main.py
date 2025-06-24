@@ -8,27 +8,34 @@ from ta.trend import MACD, EMAIndicator
 from ta.volatility import BollingerBands, AverageTrueRange
 from datetime import datetime
 import time
+import traceback
 
+# === Page Config ===
 st.set_page_config(page_title="AI Trading Bot", layout="wide")
 st.title("🚀 Advanced AI Trading Signal Bot")
 
-# === USER INPUTS ===
-ticker = st.text_input("Enter Ticker", value="AAPL").upper()
-account_balance = st.number_input("Account Balance ($)", value=10000)
-risk_percent = st.slider("Risk per Trade (%)", 0.5, 5.0, 1.0)
-strategy = st.selectbox("Choose Your Strategy", ["Scalping", "Swing Trading", "Breakout"])
-auto_refresh = st.checkbox("🔄 Auto-Refresh Every 60 Seconds")
-run_backtest = st.checkbox("📈 Run Backtest on Strategy")
-
-# Initialize trade history
+# === State Initialization ===
 if "trade_history" not in st.session_state:
     st.session_state.trade_history = []
+if "ticker" not in st.session_state:
+    st.session_state.ticker = "AAPL"
+if "account_balance" not in st.session_state:
+    st.session_state.account_balance = 10000
+if "risk_percent" not in st.session_state:
+    st.session_state.risk_percent = 1.0
+if "strategy" not in st.session_state:
+    st.session_state.strategy = "Scalping"
+if "auto_refresh" not in st.session_state:
+    st.session_state.auto_refresh = False
+if "run_backtest" not in st.session_state:
+    st.session_state.run_backtest = False
 
+# === Cached Data Fetching ===
 @st.cache_data(ttl=60)
 def get_data(ticker):
     return yf.download(ticker, period="5d", interval="15m")
 
-# === Indicator calculations ===
+# === Indicator Calculations ===
 def calculate_indicators(data):
     data['RSI'] = RSIIndicator(data['Close']).rsi()
     data['EMA20'] = EMAIndicator(data['Close'], window=20).ema_indicator()
@@ -51,11 +58,10 @@ def calculate_indicators(data):
     data.dropna(inplace=True)
     return data
 
-# === Signal generation ===
+# === Signal Generation ===
 def generate_signals(data, strategy):
     last = data.iloc[-1]
     entry = last['Close']
-    stop, take, confidence, reason = 0, 0, 50, ""
     if strategy == "Scalping":
         stop = entry - last['ATR'] * 0.8
         take = entry + last['ATR'] * 1.2
@@ -66,7 +72,7 @@ def generate_signals(data, strategy):
         take = entry + last['ATR'] * 2
         confidence = 85 if last['EMA20'] > last['EMA50'] and last['MACD'] > last['Signal_Line'] else 55
         reason = "EMA trend up + MACD crossover" if confidence == 85 else "Unconfirmed trend"
-    else:
+    else:  # Breakout
         stop = last['BB_lower']
         take = last['BB_upper'] + (last['BB_upper'] - last['BB_lower']) * 0.5
         confidence = 90 if entry > last['BB_upper'] and last['MACD'] > last['Signal_Line'] else 50
@@ -82,7 +88,7 @@ def run_backtest(data, strategy):
     signals = []
     for i in range(20, len(data)):
         slice_data = data.iloc[:i+1]
-        e, s, t, _, _, _, _, _, _ = generate_signals(slice_data, strategy)
+        e, s, t, *_ = generate_signals(slice_data, strategy)
         signals.append((e, s, t))
     wins = sum(1 for e, s, t in signals if t > e)
     losses = sum(1 for e, s, t in signals if s < e)
@@ -91,74 +97,82 @@ def run_backtest(data, strategy):
     win_rate = wins / (wins + losses)
     return f"Win Rate: {win_rate:.2%} from {len(signals)} trades"
 
-# === Chart plotting ===
+# === Chart Plotting ===
 def plot_chart(data, entry, stop, take, sell_signal, support, resistance):
     fig = go.Figure()
-    fig.add_trace(go.Candlestick(
-        x=data.index, open=data['Open'], high=data['High'], low=data['Low'], close=data['Close'], name='Price'
-    ))
+    fig.add_trace(go.Candlestick(x=data.index, open=data['Open'], high=data['High'], low=data['Low'], close=data['Close']))
     fig.add_trace(go.Scatter(x=data.index, y=data['EMA20'], mode='lines', name='EMA20'))
     fig.add_trace(go.Scatter(x=data.index, y=data['EMA50'], mode='lines', name='EMA50'))
-    # Gaps
     for idx in data['Gap_Fill'].dropna().index:
         gp = data.loc[idx, 'Open']
         fig.add_shape(type='line', x0=idx, x1=idx, y0=gp, y1=gp, line=dict(color='purple', dash='dot'))
         fig.add_annotation(x=idx, y=gp, text="Gap", showarrow=False, yshift=10, font=dict(color="purple"))
-    # Sentiment zones
     for idx in data.index:
-        col = 'lightgreen' if data.loc[idx, 'Sentiment']=='Bullish' else ('lightcoral' if data.loc[idx, 'Sentiment']=='Bearish' else None)
+        col = 'lightgreen' if data.loc[idx,'Sentiment']=='Bullish' else ('lightcoral' if data.loc[idx,'Sentiment']=='Bearish' else None)
         if col:
             fig.add_vrect(x0=idx, x1=idx, fillcolor=col, opacity=0.1, line_width=0)
-    # Support/Resistance
     fig.add_hline(y=support, line_dash='dash', line_color='green')
     fig.add_hline(y=resistance, line_dash='dash', line_color='red')
-    # Markers
-    fig.add_trace(go.Scatter(x=[data.index[-1]], y=[entry], mode='markers+text', marker=dict(color='green', size=10), text=['Entry'], name='Entry'))
-    fig.add_trace(go.Scatter(x=[data.index[-1]], y=[stop], mode='markers+text', marker=dict(color='red', size=10), text=['Stop'], name='Stop Loss'))
-    fig.add_trace(go.Scatter(x=[data.index[-1]], y=[take], mode='markers+text', marker=dict(color='blue', size=10), text=['TP'], name='Take Profit'))
+    fig.add_trace(go.Scatter(x=[data.index[-1]], y=[entry], mode='markers+text', marker=dict(color='green', size=10), text=['Entry']))
+    fig.add_trace(go.Scatter(x=[data.index[-1]], y=[stop], mode='markers+text', marker=dict(color='red', size=10), text=['Stop']))
+    fig.add_trace(go.Scatter(x=[data.index[-1]], y=[take], mode='markers+text', marker=dict(color='blue', size=10), text=['TP']))
     if sell_signal:
-        fig.add_trace(go.Scatter(x=[data.index[-1]], y=[entry], mode='markers+text', marker=dict(color='orange', size=12), text=['SELL'], name='Sell Signal'))
-    fig.update_layout(title=f"{ticker} Chart", xaxis_title='Time', yaxis_title='Price')
+        fig.add_trace(go.Scatter(x=[data.index[-1]], y=[entry], mode='markers+text', marker=dict(color='orange', size=12), text=['SELL']))
+    fig.update_layout(title=f"{st.session_state.ticker} Chart", xaxis_title='Time', yaxis_title='Price')
     return fig
 
-# === Trigger and execution ===
-trigger = st.button("Generate Trade Signal") or auto_refresh
+# === Input Form ===
+with st.form("trade_form"):
+    ticker = st.text_input("Enter Ticker", value=st.session_state.ticker).upper()
+    account_balance = st.number_input("Account Balance ($)", value=st.session_state.account_balance)
+    risk_percent = st.slider("Risk per Trade (%)", 0.5, 5.0, value=st.session_state.risk_percent)
+    strategy = st.selectbox("Choose Your Strategy", ["Scalping", "Swing Trading", "Breakout"], index=["Scalping","Swing Trading","Breakout"].index(st.session_state.strategy))
+    auto_refresh = st.checkbox("🔄 Auto-Refresh Every 60 Seconds", value=st.session_state.auto_refresh)
+    run_backtest = st.checkbox("📈 Run Backtest on Strategy", value=st.session_state.run_backtest)
+    submit = st.form_submit_button("Generate Trade Signal")
 
-if trigger:
-    st.audio("https://www.soundjay.com/buttons/sounds/button-3.mp3", autoplay=True)
-    data = get_data(ticker)
-    if data.empty:
-        st.error("No data found.")
-    else:
-        data = calculate_indicators(data)
-        entry, stop, take, confidence, reason, sell_signal, sentiment, support, resistance = generate_signals(data, strategy)
-        risk_amount = account_balance * risk_percent / 100
-        shares = int(risk_amount / (entry - stop)) if entry - stop > 0 else 0
-        timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-        st.audio("https://www.soundjay.com/buttons/sounds/beep-07.mp3", autoplay=True)
-        st.subheader("🧠 Trade Recommendation")
-        st.write(f"Strategy: {strategy}")
-        st.write(f"Signal: {'SELL' if sell_signal else 'BUY'}")
-        st.write(f"Entry: ${entry:.2f} | Stop: ${stop:.2f} | TP: ${take:.2f}")
-        st.write(f"Size: {shares} | Confidence: {confidence}%")
-        st.info(f"Reason: {reason}")
-        st.info(f"Sentiment: {sentiment}")
-        # Log trade
-        st.session_state.trade_history.append({
-            'Time': timestamp, 'Ticker': ticker, 'Strategy': strategy,
-            'Signal': 'SELL' if sell_signal else 'BUY', 'Entry': round(entry,2),
-            'Stop': round(stop,2), 'TP': round(take,2), 'Shares': shares,
-            'Confidence': confidence, 'Reason': reason, 'Sentiment': sentiment, 'Status':'Open'
-        })
-        # Chart
-        st.plotly_chart(plot_chart(data, entry, stop, take, sell_signal, support, resistance), use_container_width=True)
-        # History table
-        st.subheader("📜 Trade History")
-        st.dataframe(pd.DataFrame(st.session_state.trade_history), use_container_width=True)
-        # Backtest
-        if run_backtest:
-            st.subheader("📊 Backtest Results")
-            st.write(run_backtest(data, strategy))
-    if auto_refresh:
-        time.sleep(60)
-        st.experimental_rerun()
+if submit:
+    st.session_state.ticker = ticker
+    st.session_state.account_balance = account_balance
+    st.session_state.risk_percent = risk_percent
+    st.session_state.strategy = strategy
+    st.session_state.auto_refresh = auto_refresh
+    st.session_state.run_backtest = run_backtest
+
+    try:
+        st.audio("https://www.soundjay.com/buttons/sounds/button-3.mp3", autoplay=True)
+        data = get_data(ticker)
+        if data.empty:
+            st.error("No data found.")
+        else:
+            data = calculate_indicators(data)
+            entry, stop, take, confidence, reason, sell_signal, sentiment, support, resistance = generate_signals(data, strategy)
+            risk_amount = account_balance * risk_percent / 100
+            shares = int(risk_amount / (entry - stop)) if entry - stop > 0 else 0
+            timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            st.audio("https://www.soundjay.com/buttons/sounds/beep-07.mp3", autoplay=True)
+            st.subheader("🧠 Trade Recommendation")
+            st.write(f"Strategy: {strategy}")
+            st.write(f"Signal: {'SELL' if sell_signal else 'BUY'}")
+            st.write(f"Entry: ${entry:.2f} | Stop: ${stop:.2f} | TP: ${take:.2f}")
+            st.write(f"Size: {shares} | Confidence: {confidence}%")
+            st.info(f"Reason: {reason}")
+            st.info(f"Sentiment: {sentiment}")
+            st.session_state.trade_history.append({
+                'Time': timestamp, 'Ticker': ticker, 'Strategy': strategy,
+                'Signal': 'SELL' if sell_signal else 'BUY', 'Entry': round(entry,2),
+                'Stop': round(stop,2), 'TP': round(take,2), 'Shares': shares,
+                'Confidence': confidence, 'Reason': reason, 'Sentiment': sentiment, 'Status':'Open'
+            })
+            st.plotly_chart(plot_chart(data, entry, stop, take, sell_signal, support, resistance), use_container_width=True)
+            st.subheader("📜 Trade History")
+            st.dataframe(pd.DataFrame(st.session_state.trade_history), use_container_width=True)
+            if run_backtest:
+                st.subheader("📊 Backtest Results")
+                st.write(run_backtest(data, strategy))
+    except Exception:
+        st.error("An error occurred:")
+        st.text(traceback.format_exc())
+else:
+    st.info("Complete the form and click 'Generate Trade Signal' to run the analysis.")
+
