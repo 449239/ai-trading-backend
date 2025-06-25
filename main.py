@@ -128,13 +128,7 @@ def get_chart(ticker: str, theme: str = "dark", showVolume: bool = True, candleS
     fig.update_layout(
         template="plotly_dark" if theme == "dark" else "plotly_white",
         margin=dict(t=20, b=20),
-        height=500,
+        height=500
     )
-
-    return fig.to_html(include_plotlyjs='cdn')
-
-    )
-    if showVolume:
-        fig.add_trace(go.Bar(x=df.index, y=df['Volume'], name="Volume", yaxis="y2"))
 
     return fig.to_html(include_plotlyjs='cdn')
