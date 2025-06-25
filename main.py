@@ -1,6 +1,5 @@
-from fastapi import FastAPI, Query
+from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from typing import Optional
 import yfinance as yf
 import pandas as pd
 import numpy as np
@@ -28,7 +27,7 @@ def set_preference(key: str, value: str):
 @app.get("/api/signal")
 def get_signal(ticker: str, strategy: str = "Swing Trading"):
     data = yf.download(ticker, period="5d", interval="15m")
-    
+
     if data is None or data.empty:
         return {
             "signal": None,
@@ -52,7 +51,7 @@ def get_signal(ticker: str, strategy: str = "Swing Trading"):
     data['RSI'] = 100 - (100 / (1 + data['Close'].pct_change().rolling(window=14).mean()))
     data['MACD'] = data['EMA20'] - data['EMA50']
 
-    # Fix: Use iloc[-1] for latest values
+    # Use latest values correctly
     signal = "BUY" if data['MACD'].iloc[-1] > 0 and data['RSI'].iloc[-1] < 70 else "SELL"
     confidence = 85 if signal == "BUY" else 70
     entry_price = round(data['Close'].iloc[-1], 2)
@@ -61,12 +60,18 @@ def get_signal(ticker: str, strategy: str = "Swing Trading"):
     support = round(data['Low'].rolling(window=20).min().iloc[-1], 2)
     resistance = round(data['High'].rolling(window=20).max().iloc[-1], 2)
 
+    # Fixed gap detection logic
     gaps = []
+    gap_threshold = data['Close'].std()
+
     for i in range(1, len(data)):
-        if abs(data['Open'].iloc[i] - data['Close'].iloc[i - 1]) > data['Close'].std():
+        open_now = data['Open'].iloc[i]
+        close_prev = data['Close'].iloc[i - 1]
+
+        if abs(open_now - close_prev) > gap_threshold:
             gaps.append({
                 "time": data.index[i].strftime('%Y-%m-%d %H:%M'),
-                "price": data['Open'].iloc[i],
+                "price": open_now,
                 "type": "gap"
             })
 
@@ -114,4 +119,3 @@ def get_chart(ticker: str, theme: str = "dark", showVolume: bool = True, candleS
         fig.add_trace(go.Bar(x=df.index, y=df['Volume'], name="Volume", yaxis="y2"))
 
     return fig.to_html(include_plotlyjs='cdn')
-
