@@ -6,3 +6,4 @@ numpy
 plotly
 python-multipart
 ta
+jinja2
