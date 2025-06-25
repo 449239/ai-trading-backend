@@ -129,7 +129,14 @@ def get_chart(ticker: str, theme: str = "dark", showVolume: bool = True, candleS
     fig.update_layout(
         template="plotly_dark" if theme == "dark" else "plotly_white",
         margin=dict(t=20, b=20),
-        height=500
+        height=500,
+        yaxis=dict(title="Price"),
+        yaxis2=dict(
+            title="Volume",
+            overlaying="y",
+            side="right",
+            showgrid=False
+        )
     )
 
     return HTMLResponse(content=fig.to_html(include_plotlyjs='cdn'))
