@@ -1,6 +1,8 @@
-streamlit>=1.0.0
+fastapi
+uvicorn
 yfinance
 pandas
 numpy
 plotly
+python-multipart
 ta
