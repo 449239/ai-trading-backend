@@ -37,7 +37,7 @@ def get_signal(ticker: str, strategy: str = "Swing Trading"):
     data['MACD'] = data['EMA20'] - data['EMA50']
 
     latest = data.iloc[-1]
-    signal = "BUY" if latest['MACD'] > 0 and latest['RSI'] < 70 else "SELL"
+    signal = "BUY" if latest['MACD'].item() > 0 and latest['RSI'].item() < 70 else "SELL"
     confidence = 85 if signal == "BUY" else 70
     entry_price = round(latest['Close'], 2)
     stop = round(entry_price * 0.98, 2)
@@ -135,6 +135,12 @@ def get_chart(ticker: str, theme: str = "dark", showVolume: bool = True, candleS
             title="Volume",
             overlaying="y",
             side="right",
+            showgrid=False
+        )
+    )
+
+    return HTMLResponse(content=fig.to_html(include_plotlyjs='cdn'))
+
             showgrid=False
         )
     )
