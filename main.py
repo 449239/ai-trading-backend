@@ -54,19 +54,19 @@ def get_signal(ticker: str, strategy: str = "Swing Trading"):
     # Use latest values correctly
     signal = "BUY" if data['MACD'].iloc[-1] > 0 and data['RSI'].iloc[-1] < 70 else "SELL"
     confidence = 85 if signal == "BUY" else 70
-    entry_price = round(data['Close'].iloc[-1], 2)
+    entry_price = round(float(data['Close'].iloc[-1]), 2)
     stop = round(entry_price * 0.98, 2)
     take = round(entry_price * 1.02, 2)
-    support = round(data['Low'].rolling(window=20).min().iloc[-1], 2)
-    resistance = round(data['High'].rolling(window=20).max().iloc[-1], 2)
+    support = round(float(data['Low'].rolling(window=20).min().iloc[-1]), 2)
+    resistance = round(float(data['High'].rolling(window=20).max().iloc[-1]), 2)
 
-    # Fixed gap detection logic
+    # Gap detection (safe casting)
     gaps = []
-    gap_threshold = data['Close'].std()
+    gap_threshold = float(data['Close'].std())
 
     for i in range(1, len(data)):
-        open_now = data['Open'].iloc[i]
-        close_prev = data['Close'].iloc[i - 1]
+        open_now = float(data['Open'].iloc[i])
+        close_prev = float(data['Close'].iloc[i - 1])
 
         if abs(open_now - close_prev) > gap_threshold:
             gaps.append({
@@ -85,7 +85,7 @@ def get_signal(ticker: str, strategy: str = "Swing Trading"):
         "support": support,
         "resistance": resistance,
         "timestamp": datetime.datetime.now().strftime("%Y-%m-%d %H:%M"),
-        "reason": f"MACD: {round(data['MACD'].iloc[-1], 2)}, RSI: {round(data['RSI'].iloc[-1], 2)}",
+        "reason": f"MACD: {round(float(data['MACD'].iloc[-1]), 2)}, RSI: {round(float(data['RSI'].iloc[-1]), 2)}",
         "gaps": gaps,
         "PnL_dollars": 0,
         "PnL_percent": 0
