@@ -1,5 +1,6 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import HTMLResponse
 from typing import Optional
 import yfinance as yf
 import pandas as pd
@@ -83,11 +84,11 @@ def get_signal(ticker: str, strategy: str = "Swing Trading"):
 def get_trade_history():
     return {"history": trade_log}
 
-@app.get("/api/chart")
+@app.get("/api/chart", response_class=HTMLResponse)
 def get_chart(ticker: str, theme: str = "dark", showVolume: bool = True, candleStyle: str = "candlestick"):
     df = yf.download(ticker, period="5d", interval="15m")
     if df.empty:
-        return "<div style='color:white;padding:1em;'>No chart data available.</div>"
+        return HTMLResponse("<div style='color:white;padding:1em;'>No chart data available.</div>")
 
     fig = go.Figure()
 
@@ -131,4 +132,4 @@ def get_chart(ticker: str, theme: str = "dark", showVolume: bool = True, candleS
         height=500
     )
 
-    return fig.to_html(include_plotlyjs='cdn')
+    return HTMLResponse(content=fig.to_html(include_plotlyjs='cdn'))
