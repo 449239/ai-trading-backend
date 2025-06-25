@@ -1,104 +1,100 @@
 from fastapi import FastAPI, Query
 from fastapi.middleware.cors import CORSMiddleware
+from typing import Optional
 import yfinance as yf
-import numpy as np
 import pandas as pd
-from ta.momentum import RSIIndicator
-from ta.trend import EMAIndicator, MACD
-from ta.volatility import BollingerBands, AverageTrueRange
-from datetime import datetime
+import numpy as np
 import plotly.graph_objs as go
+import datetime
 
 app = FastAPI()
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"], allow_credentials=True, allow_methods=["*"], allow_headers=["*"]
+    allow_origins=["*"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
 )
 
-preferences = {}
+user_preferences = {}
+trade_log = []
 
 @app.get("/api/set-preference")
 def set_preference(key: str, value: str):
-    preferences[key] = value.lower() == "true"
-    return {"status": "ok", "key": key, "value": preferences[key]}
+    user_preferences[key] = value.lower() == "true"
+    return {"status": "updated", "preferences": user_preferences}
 
 @app.get("/api/signal")
-def get_signal(ticker: str = "AAPL", strategy: str = "Scalping"):
-    df = yf.download(ticker, period="5d", interval="15m")
-    df.dropna(inplace=True)
+def get_signal(ticker: str, strategy: str = "Swing Trading"):
+    data = yf.download(ticker, period="5d", interval="15m")
+    data.dropna(inplace=True)
 
-    df["RSI"] = RSIIndicator(df["Close"]).rsi()
-    df["EMA"] = EMAIndicator(df["Close"]).ema_indicator()
-    df["MACD"] = MACD(df["Close"]).macd()
-    bb = BollingerBands(df["Close"])
-    df["BB_high"] = bb.bollinger_hband()
-    df["BB_low"] = bb.bollinger_lband()
-    df["ATR"] = AverageTrueRange(df["High"], df["Low"], df["Close"]).average_true_range()
+    data['EMA20'] = data['Close'].ewm(span=20).mean()
+    data['EMA50'] = data['Close'].ewm(span=50).mean()
+    data['RSI'] = 100 - (100 / (1 + data['Close'].pct_change().rolling(window=14).mean()))
+    data['MACD'] = data['EMA20'] - data['EMA50']
+    latest = data.iloc[-1]
 
-    close = df["Close"].iloc[-1]
-    ema = df["EMA"].iloc[-1]
-    rsi = df["RSI"].iloc[-1]
-    macd_val = df["MACD"].iloc[-1]
-    bb_high = df["BB_high"].iloc[-1]
-    bb_low = df["BB_low"].iloc[-1]
+    signal = "BUY" if latest['MACD'] > 0 and latest['RSI'] < 70 else "SELL"
+    confidence = 85 if signal == "BUY" else 70
+    entry_price = round(latest['Close'], 2)
+    stop = round(entry_price * 0.98, 2)
+    take = round(entry_price * 1.02, 2)
+    support = round(data['Low'].rolling(window=20).min().iloc[-1], 2)
+    resistance = round(data['High'].rolling(window=20).max().iloc[-1], 2)
 
-    signal, reason = "HOLD", "Neutral"
+    gaps = []
+    for i in range(1, len(data)):
+        if abs(data['Open'].iloc[i] - data['Close'].iloc[i - 1]) > data['Close'].std():
+            gaps.append({
+                "time": data.index[i].strftime('%Y-%m-%d %H:%M'),
+                "price": data['Open'].iloc[i],
+                "type": "gap"
+            })
 
-    if strategy == "Scalping":
-        if rsi < 30 and close < ema:
-            signal, reason = "BUY", "Oversold + below EMA"
-        elif rsi > 70 and close > ema:
-            signal, reason = "SELL", "Overbought + above EMA"
-    elif strategy == "Swing Trading":
-        if macd_val > 0 and close > ema:
-            signal, reason = "BUY", "MACD bullish + above EMA"
-        elif macd_val < 0 and close < ema:
-            signal, reason = "SELL", "MACD bearish + below EMA"
-    elif strategy == "Breakout":
-        if close > bb_high:
-            signal, reason = "BUY", "Price broke above Bollinger Band"
-        elif close < bb_low:
-            signal, reason = "SELL", "Price broke below Bollinger Band"
-
-    support = df["Low"].rolling(10).min().iloc[-1]
-    resistance = df["High"].rolling(10).max().iloc[-1]
-
-    return {
+    trade = {
         "signal": signal,
-        "confidence": round(100 - abs(rsi - 50), 2),
-        "sentiment": "Bullish" if signal == "BUY" else "Bearish" if signal == "SELL" else "Neutral",
-        "entry": round(close, 2),
-        "stop": round(close * 0.98, 2),
-        "take": round(close * 1.02, 2),
-        "support": round(support, 2),
-        "resistance": round(resistance, 2),
-        "reason": reason,
-        "timestamp": datetime.utcnow().isoformat()
+        "entry": entry_price,
+        "confidence": confidence,
+        "sentiment": "Bullish" if signal == "BUY" else "Bearish",
+        "stop": stop,
+        "take": take,
+        "support": support,
+        "resistance": resistance,
+        "timestamp": datetime.datetime.now().strftime("%Y-%m-%d %H:%M"),
+        "reason": f"MACD: {round(latest['MACD'],2)}, RSI: {round(latest['RSI'],2)}",
+        "gaps": gaps,
+        "PnL_dollars": 0,
+        "PnL_percent": 0
     }
 
+    trade_log.append(trade)
+    if len(trade_log) > 100:
+        trade_log.pop(0)
+
+    return trade
+
+@app.get("/api/trades")
+def get_trade_history():
+    return {"history": trade_log}
+
 @app.get("/api/chart")
-def get_chart(ticker: str, theme: str = "dark", showVolume: bool = False, candleStyle: str = "standard"):
+def get_chart(ticker: str, theme: str = "dark", showVolume: bool = True, candleStyle: str = "standard"):
     df = yf.download(ticker, period="5d", interval="15m")
-    df.reset_index(inplace=True)
-
-    candle = go.Candlestick(
-        x=df["Datetime"],
-        open=df["Open"], high=df["High"],
-        low=df["Low"], close=df["Close"],
-        increasing_line_color='green',
-        decreasing_line_color='red'
-    )
-
-    layout = go.Layout(
+    fig = go.Figure(data=[go.Candlestick(
+        x=df.index,
+        open=df['Open'], high=df['High'],
+        low=df['Low'], close=df['Close'],
+        name="Candles"
+    )])
+    fig.update_layout(
         template="plotly_dark" if theme == "dark" else "plotly_white",
-        xaxis=dict(title="Time"), yaxis=dict(title="Price"),
-        height=500, margin=dict(l=40, r=40, t=40, b=40)
+        margin=dict(t=20, b=20),
+        height=500,
     )
+    if showVolume:
+        fig.add_trace(go.Bar(x=df.index, y=df['Volume'], name="Volume", yaxis="y2"))
 
-    fig = go.Figure(data=[candle], layout=layout)
+    return fig.to_html(include_plotlyjs='cdn')
 
-    if preferences.get("show_volume", False) and showVolume:
-        fig.add_trace(go.Bar(x=df["Datetime"], y=df["Volume"], name="Volume", yaxis="y2"))
-
-    return fig.to_html(full_html=False)
