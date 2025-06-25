@@ -28,17 +28,34 @@ def set_preference(key: str, value: str):
 @app.get("/api/signal")
 def get_signal(ticker: str, strategy: str = "Swing Trading"):
     data = yf.download(ticker, period="5d", interval="15m")
-    data.dropna(inplace=True)
+    
+    if data is None or data.empty:
+        return {
+            "signal": None,
+            "confidence": 0,
+            "entry": 0,
+            "stop": 0,
+            "take": 0,
+            "support": 0,
+            "resistance": 0,
+            "timestamp": str(datetime.datetime.now()),
+            "reason": "No data returned for this ticker",
+            "gaps": [],
+            "PnL_dollars": 0,
+            "PnL_percent": 0,
+            "sentiment": "Neutral"
+        }
 
+    data.dropna(inplace=True)
     data['EMA20'] = data['Close'].ewm(span=20).mean()
     data['EMA50'] = data['Close'].ewm(span=50).mean()
     data['RSI'] = 100 - (100 / (1 + data['Close'].pct_change().rolling(window=14).mean()))
     data['MACD'] = data['EMA20'] - data['EMA50']
-    latest = data.iloc[-1]
 
-    signal = "BUY" if latest['MACD'] > 0 and latest['RSI'] < 70 else "SELL"
+    # Fix: Use iloc[-1] for latest values
+    signal = "BUY" if data['MACD'].iloc[-1] > 0 and data['RSI'].iloc[-1] < 70 else "SELL"
     confidence = 85 if signal == "BUY" else 70
-    entry_price = round(latest['Close'], 2)
+    entry_price = round(data['Close'].iloc[-1], 2)
     stop = round(entry_price * 0.98, 2)
     take = round(entry_price * 1.02, 2)
     support = round(data['Low'].rolling(window=20).min().iloc[-1], 2)
@@ -63,7 +80,7 @@ def get_signal(ticker: str, strategy: str = "Swing Trading"):
         "support": support,
         "resistance": resistance,
         "timestamp": datetime.datetime.now().strftime("%Y-%m-%d %H:%M"),
-        "reason": f"MACD: {round(latest['MACD'],2)}, RSI: {round(latest['RSI'],2)}",
+        "reason": f"MACD: {round(data['MACD'].iloc[-1], 2)}, RSI: {round(data['RSI'].iloc[-1], 2)}",
         "gaps": gaps,
         "PnL_dollars": 0,
         "PnL_percent": 0
